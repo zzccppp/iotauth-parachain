@@ -59,6 +59,9 @@ use xcm_executor::XcmExecutor;
 /// Import the template pallet.
 pub use pallet_template;
 
+/// Import the iot-auth pallet.
+pub use iot_auth;
+
 /// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
 pub type Signature = MultiSignature;
 
@@ -453,6 +456,14 @@ impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 }
 
+/// Configure the sudo pallet
+impl pallet_sudo::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+}
+
+impl pallet_randomness_collective_flip::Config for Runtime {}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime where
@@ -487,6 +498,13 @@ construct_runtime!(
 
 		// Template
 		TemplatePallet: pallet_template::{Pallet, Call, Storage, Event<T>}  = 40,
+		// Sudo
+		Sudo: pallet_sudo,
+		//XCM Ping
+		Spambot: cumulus_ping::{Pallet, Call, Storage, Event<T>} = 99,
+		// IotAuth Pallet
+		IotAuth: iot_auth,
+		RandomnessCollectiveFlip: pallet_randomness_collective_flip,
 	}
 );
 

@@ -1,6 +1,6 @@
 use super::{
-	AccountId, Balances, ParachainInfo, ParachainSystem, PolkadotXcm, Runtime, RuntimeCall,
-	RuntimeEvent, RuntimeOrigin, WeightToFee, XcmpQueue,
+	AccountId, Balances, ParachainInfo, ParachainSystem, PolkadotXcm, RandomnessCollectiveFlip,
+	Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, WeightToFee, XcmpQueue,
 };
 use core::marker::PhantomData;
 use frame_support::{
@@ -111,6 +111,19 @@ where
 	}
 }
 
+pub struct NoBarrier;
+
+impl ShouldExecute for NoBarrier {
+	fn should_execute<RuntimeCall>(
+		_origin: &MultiLocation,
+		_message: &mut Xcm<RuntimeCall>,
+		_max_weight: XCMWeight,
+		_weight_credit: &mut XCMWeight,
+	) -> Result<(), ()> {
+		Ok(())
+	}
+}
+
 // See issue <https://github.com/paritytech/polkadot/issues/5233>
 pub struct DenyReserveTransferToRelayChain;
 impl ShouldExecute for DenyReserveTransferToRelayChain {
@@ -127,20 +140,20 @@ impl ShouldExecute for DenyReserveTransferToRelayChain {
 				InitiateReserveWithdraw {
 					reserve: MultiLocation { parents: 1, interior: Here },
 					..
-				} | DepositReserveAsset { dest: MultiLocation { parents: 1, interior: Here }, .. } |
-					TransferReserveAsset {
+				} | DepositReserveAsset { dest: MultiLocation { parents: 1, interior: Here }, .. }
+					| TransferReserveAsset {
 						dest: MultiLocation { parents: 1, interior: Here },
 						..
 					}
 			)
 		}) {
-			return Err(()) // Deny
+			return Err(()); // Deny
 		}
 
 		// An unexpected reserve transfer has arrived from the Relay Chain. Generally, `IsReserve`
 		// should not allow this, but we just log it here.
-		if matches!(origin, MultiLocation { parents: 1, interior: Here }) &&
-			message.0.iter().any(|inst| matches!(inst, ReserveAssetDeposited { .. }))
+		if matches!(origin, MultiLocation { parents: 1, interior: Here })
+			&& message.0.iter().any(|inst| matches!(inst, ReserveAssetDeposited { .. }))
 		{
 			log::warn!(
 				target: "xcm::barriers",
@@ -152,15 +165,19 @@ impl ShouldExecute for DenyReserveTransferToRelayChain {
 	}
 }
 
-pub type Barrier = DenyThenTry<
-	DenyReserveTransferToRelayChain,
-	(
-		TakeWeightCredit,
-		AllowTopLevelPaidExecutionFrom<Everything>,
-		AllowUnpaidExecutionFrom<ParentOrParentsExecutivePlurality>,
-		// ^^^ Parent and its exec plurality get free execution
-	),
->;
+// pub type Barrier = DenyThenTry<
+// 	DenyReserveTransferToRelayChain,
+// 	(
+// 		TakeWeightCredit,
+// 		AllowTopLevelPaidExecutionFrom<Everything>,
+// 		AllowUnpaidExecutionFrom<ParentOrParentsExecutivePlurality>,
+// 		AllowUnpaidExecutionFrom<Everything>,
+// 		// ^^^ Parent and its exec plurality get free execution
+// 	),
+// >;
+
+/// Just Allow all origins
+pub type Barrier = NoBarrier;
 
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
@@ -218,4 +235,23 @@ impl pallet_xcm::Config for Runtime {
 impl cumulus_pallet_xcm::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
+}
+
+// Configure the cumulus_ping
+
+impl cumulus_ping::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
+	type XcmSender = XcmRouter;
+}
+
+impl iot_auth::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	// type Currency = Balances;
+	type CollectionRandomness = RandomnessCollectiveFlip;
+	type MaximumOwned = frame_support::pallet_prelude::ConstU32<100>;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
+	type XcmSender = XcmRouter;
 }

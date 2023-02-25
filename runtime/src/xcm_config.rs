@@ -251,7 +251,9 @@ impl iot_auth::Config for Runtime {
 	// type Currency = Balances;
 	type CollectionRandomness = RandomnessCollectiveFlip;
 	type MaximumOwned = frame_support::pallet_prelude::ConstU32<100>;
+	type MaxDeviceDescription = frame_support::pallet_prelude::ConstU32<512>;
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type XcmSender = XcmRouter;
+	type SelfParaId = parachain_info::Pallet<Runtime>;
 }

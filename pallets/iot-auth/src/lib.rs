@@ -16,7 +16,6 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_support::traits::Randomness;
 	use frame_system::pallet_prelude::*;
-	
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
@@ -30,6 +29,9 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaximumOwned: Get<u32>;
 
+		#[pallet::constant]
+		type MaxDeviceDescription: Get<u32>;
+
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		type RuntimeOrigin: From<<Self as SystemConfig>::RuntimeOrigin>
@@ -37,17 +39,18 @@ pub mod pallet {
 		/// The overarching call type; we assume sibling chains use the same type.
 		type RuntimeCall: From<Call<Self>> + Encode;
 		type XcmSender: SendXcm;
+		type SelfParaId: Get<ParaId>;
 	}
 
-	#[derive(Clone, Encode, Decode, PartialEq, Copy, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	pub struct IotDevice<T: Config> {
 		pub unique_id: [u8; 16],
 		pub owner: T::AccountId,
-		// May Add More Later
-		// 设备的公钥
-		// 设备的信息
-		// 设备的硬件ID
+		pub description: BoundedVec<u8, T::MaxDeviceDescription>, // 设备的信息
+		pub hardware_id: [u8; 16],                                 // 设备的硬件ID
+		                                                          // May Add More Later
+		                                                          // 设备的公钥
 	}
 
 	#[pallet::storage]
@@ -67,19 +70,27 @@ pub mod pallet {
 
 	#[pallet::error]
 	pub enum Error<T> {
-		/// Each collectible must have a unique identifier
+		/// Each description must have a unique identifier
 		DuplicateDevices,
 		/// An account can't exceed the `MaximumOwned` constant
 		MaximumDevicesOwned,
-		/// The total supply of collectibles can't exceed the u64 limit
+		/// The total supply of description can't exceed the u64 limit
 		BoundsOverflow,
+		/// The device description is too long
+		DescriptionTooLong,
 	}
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A new collectible was successfully created.
-		CollectibleCreated { collectible: [u8; 16], owner: T::AccountId },
+		DeviceCreated {
+			collectible: [u8; 16],
+			owner: T::AccountId,
+		},
+		TestForQueryId {
+			parachain_id: ParaId,
+		},
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -103,9 +114,19 @@ pub mod pallet {
 		}
 
 		// Function to mint a collectible
-		pub fn mint(owner: &T::AccountId, unique_id: [u8; 16]) -> Result<[u8; 16], DispatchError> {
+		pub fn mint(
+			owner: &T::AccountId,
+			unique_id: [u8; 16],
+			desc: &Vec<u8>,
+			hardware_id: [u8; 16],
+		) -> Result<[u8; 16], DispatchError> {
 			// Create a new object
-			let collectible = IotDevice::<T> { unique_id, owner: owner.clone() };
+			let collectible = IotDevice::<T> {
+				unique_id,
+				owner: owner.clone(),
+				description: BoundedVec::try_from(desc.clone()).map_err(|_| { Error::<T>::DescriptionTooLong })?,
+				hardware_id,
+			};
 
 			// Check if the collectible exists in the storage map
 			ensure!(
@@ -126,7 +147,7 @@ pub mod pallet {
 			IotDeviceCount::<T>::put(new_count);
 
 			// Deposit the "Collectiblereated" event.
-			Self::deposit_event(Event::CollectibleCreated {
+			Self::deposit_event(Event::DeviceCreated {
 				collectible: unique_id,
 				owner: owner.clone(),
 			});
@@ -139,11 +160,14 @@ pub mod pallet {
 	// Pallet callable functions
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-
 		/// Create a new unique devices
 		#[pallet::call_index(1)]
 		#[pallet::weight(0)]
-		pub fn create_devices(origin: OriginFor<T>) -> DispatchResult {
+		pub fn create_devices(
+			origin: OriginFor<T>,
+			description: Vec<u8>,
+			hardware_id: [u8; 16],
+		) -> DispatchResult {
 			// Make sure the caller is from a signed origin
 			let sender = ensure_signed(origin)?;
 
@@ -151,8 +175,17 @@ pub mod pallet {
 			let collectible_gen_unique_id = Self::gen_unique_id();
 
 			// Write new collectible to storage by calling helper function
-			Self::mint(&sender, collectible_gen_unique_id)?;
+			Self::mint(&sender, collectible_gen_unique_id, &description, hardware_id)?;
 
+			Ok(())
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(0)]
+		pub fn query_id(origin: OriginFor<T>) -> DispatchResult {
+			let sender = ensure_signed(origin)?;
+			let parachain_id = T::SelfParaId::get();
+			Self::deposit_event(Event::TestForQueryId { parachain_id });
 			Ok(())
 		}
 	}

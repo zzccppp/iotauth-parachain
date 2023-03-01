@@ -48,7 +48,7 @@ pub mod pallet {
 		pub unique_id: [u8; 16],
 		pub owner: T::AccountId,
 		pub description: BoundedVec<u8, T::MaxDeviceDescription>, // 设备的信息
-		pub hardware_id: [u8; 16],                                 // 设备的硬件ID
+		pub hardware_id: [u8; 16],                                // 设备的硬件ID
 		                                                          // May Add More Later
 		                                                          // 设备的公钥
 	}
@@ -91,6 +91,13 @@ pub mod pallet {
 		TestForQueryId {
 			parachain_id: ParaId,
 		},
+		TestMessage {
+			message : u32,
+		},
+		TestResponse {
+			unique_id: [u8; 16],
+			account: T::AccountId,
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -124,7 +131,8 @@ pub mod pallet {
 			let collectible = IotDevice::<T> {
 				unique_id,
 				owner: owner.clone(),
-				description: BoundedVec::try_from(desc.clone()).map_err(|_| { Error::<T>::DescriptionTooLong })?,
+				description: BoundedVec::try_from(desc.clone())
+					.map_err(|_| Error::<T>::DescriptionTooLong)?,
 				hardware_id,
 			};
 
@@ -183,6 +191,65 @@ pub mod pallet {
 		#[pallet::call_index(2)]
 		#[pallet::weight(0)]
 		pub fn query_id(origin: OriginFor<T>) -> DispatchResult {
+			let sender = ensure_signed(origin)?;
+			let parachain_id = T::SelfParaId::get();
+			Self::deposit_event(Event::TestForQueryId { parachain_id });
+			Ok(())
+		}
+
+		#[pallet::call_index(3)]
+		#[pallet::weight(0)]
+		pub fn request_for_parachain_auth(
+			origin: OriginFor<T>,
+			unique_id: [u8; 16],
+			para: ParaId,
+		) -> DispatchResult {
+			// will be executed in the local parachain (A)
+			let sender = ensure_signed(origin)?;
+			let parachain_id = T::SelfParaId::get();
+
+			match T::XcmSender::send_xcm(
+				(1, Junction::Parachain(para.into())),
+				Xcm(vec![Transact {
+					origin_type: OriginKind::Native,
+					require_weight_at_most: 1_000,
+					call: <T as Config>::RuntimeCall::from(Call::<T>::reponse_for_parachain_auth {
+						sender,
+						unique_id,
+					})
+					.encode()
+					.into(),
+				}]),
+			) {
+				Ok(()) => {
+					Self::deposit_event(Event::TestMessage { message: 11 });
+				},
+				Err(e) => {
+					Self::deposit_event(Event::TestMessage { message: 22 });
+				},
+			};
+
+			Ok(())
+		}
+
+		#[pallet::call_index(4)]
+		#[pallet::weight(0)]
+		pub fn reponse_for_parachain_auth(
+			origin: OriginFor<T>,
+			sender: T::AccountId,
+			unique_id: [u8; 16],
+		) -> DispatchResult {
+			// will be executed in the parachain (B)
+			let para = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
+			let parachain_id = T::SelfParaId::get();
+			Self::deposit_event(Event::TestResponse { unique_id, account: sender });
+			Ok(())
+		}
+
+		#[pallet::call_index(5)]
+		#[pallet::weight(0)]
+		pub fn receive_auth_message(origin: OriginFor<T>, unique_id: [u8; 16]) -> DispatchResult {
+			// will be executed in the local parachain (A)
 			let sender = ensure_signed(origin)?;
 			let parachain_id = T::SelfParaId::get();
 			Self::deposit_event(Event::TestForQueryId { parachain_id });

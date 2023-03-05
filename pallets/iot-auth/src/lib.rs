@@ -68,6 +68,9 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
+	#[pallet::storage]
+	pub(super) type CAPublicKey<T: Config> = StorageValue<_, [u8; 32], ValueQuery>;
+
 	#[pallet::error]
 	pub enum Error<T> {
 		/// Each description must have a unique identifier
@@ -88,16 +91,30 @@ pub mod pallet {
 			collectible: [u8; 16],
 			owner: T::AccountId,
 		},
+		CAPublicKeyUpdated {
+			public_key: [u8; 32],
+		},
+		LocalAuthSuccess {
+			account: T::AccountId,
+			unique_id: [u8; 16],
+		},
+		LocalAuthFailed {
+			account: T::AccountId,
+		},
+		LocalAuthCredentialIssued {
+			message: u32,
+			signature: [u8; 64],
+		},
 		TestForQueryId {
 			parachain_id: ParaId,
 		},
 		TestMessage {
-			message : u32,
+			message: u32,
 		},
 		TestResponse {
 			unique_id: [u8; 16],
 			account: T::AccountId,
-		}
+		},
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -253,6 +270,45 @@ pub mod pallet {
 			let sender = ensure_signed(origin)?;
 			let parachain_id = T::SelfParaId::get();
 			Self::deposit_event(Event::TestForQueryId { parachain_id });
+			Ok(())
+		}
+
+		#[pallet::call_index(6)]
+		#[pallet::weight(0)]
+		pub fn request_local_auth(origin: OriginFor<T>, unique_id: [u8; 16]) -> DispatchResult {
+			// will be executed in the local parachain (A)
+			let sender = ensure_signed(origin)?;
+
+			// 保证该用户存在
+			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
+				Self::deposit_event(Event::LocalAuthFailed { account: sender.clone() });
+			}
+
+			// 保证该用户拥有该设备
+			match OwnerOfCollectibles::<T>::get(&sender).iter().find(|&&x| x == unique_id) {
+				Some(dev) => {
+					Self::deposit_event(Event::LocalAuthSuccess {
+						account: sender,
+						unique_id: dev.clone(),
+					});
+				},
+				None => {
+					Self::deposit_event(Event::LocalAuthFailed { account: sender });
+				},
+			}
+
+			Ok(())
+		}
+
+		#[pallet::call_index(7)]
+		#[pallet::weight(0)]
+		pub fn update_ca_pubkey(origin: OriginFor<T>, pubkey: [u8; 32]) -> DispatchResult {
+			// will be executed in the local parachain (A)
+			ensure_root(origin)?;
+			if CAPublicKey::<T>::get() != pubkey {
+				CAPublicKey::<T>::put(pubkey);
+				Self::deposit_event(Event::CAPublicKeyUpdated { public_key: pubkey });
+			}
 			Ok(())
 		}
 	}

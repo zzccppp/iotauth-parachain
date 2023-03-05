@@ -32,6 +32,9 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxDeviceDescription: Get<u32>;
 
+		#[pallet::constant]
+		type MaxCredentialLength: Get<u32>;
+
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		type RuntimeOrigin: From<<Self as SystemConfig>::RuntimeOrigin>
@@ -102,7 +105,7 @@ pub mod pallet {
 			account: T::AccountId,
 		},
 		LocalAuthCredentialIssued {
-			message: u32,
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
 			signature: [u8; 64],
 		},
 		TestForQueryId {
@@ -309,6 +312,19 @@ pub mod pallet {
 				CAPublicKey::<T>::put(pubkey);
 				Self::deposit_event(Event::CAPublicKeyUpdated { public_key: pubkey });
 			}
+			Ok(())
+		}
+
+		#[pallet::call_index(8)]
+		#[pallet::weight(0)]
+		pub fn issue_local_credential(
+			origin: OriginFor<T>,
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
+			signature: [u8; 64],
+		) -> DispatchResult {
+			// will be executed in the local parachain (A)
+			ensure_root(origin)?;
+			Self::deposit_event(Event::LocalAuthCredentialIssued { credential, signature });
 			Ok(())
 		}
 	}

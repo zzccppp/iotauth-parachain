@@ -252,6 +252,7 @@ impl iot_auth::Config for Runtime {
 	type CollectionRandomness = RandomnessCollectiveFlip;
 	type MaximumOwned = frame_support::pallet_prelude::ConstU32<100>;
 	type MaxDeviceDescription = frame_support::pallet_prelude::ConstU32<512>;
+	type MaxCredentialLength = frame_support::pallet_prelude::ConstU32<4096>;
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type XcmSender = XcmRouter;

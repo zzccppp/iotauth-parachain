@@ -108,6 +108,22 @@ pub mod pallet {
 			credential: BoundedVec<u8, T::MaxCredentialLength>,
 			signature: [u8; 64],
 		},
+		ParaAuthSuccess {
+			account: T::AccountId,
+			unique_id: [u8; 16],
+			para_source: ParaId,
+			para_remote: ParaId,
+		},
+		ParaAuthFailed {
+			account: T::AccountId,
+			para_source: ParaId,
+		},
+		ParaAuthCredentialIssued {
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
+			signature: [u8; 64],
+			para_source: ParaId,
+			para_remote: ParaId,
+		},
 		TestForQueryId {
 			parachain_id: ParaId,
 		},
@@ -226,7 +242,6 @@ pub mod pallet {
 		) -> DispatchResult {
 			// will be executed in the local parachain (A)
 			let sender = ensure_signed(origin)?;
-			let parachain_id = T::SelfParaId::get();
 
 			match T::XcmSender::send_xcm(
 				(1, Junction::Parachain(para.into())),
@@ -260,19 +275,54 @@ pub mod pallet {
 			unique_id: [u8; 16],
 		) -> DispatchResult {
 			// will be executed in the parachain (B)
-			let para = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
-			let parachain_id = T::SelfParaId::get();
-			Self::deposit_event(Event::TestResponse { unique_id, account: sender });
+			let para_source = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
+			let para_local = T::SelfParaId::get();
+
+			// 保证该用户存在
+			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
+				Self::deposit_event(Event::ParaAuthFailed { account: sender.clone(), para_source });
+
+				return Ok(());
+			}
+
+			// 保证该用户拥有该设备
+			match OwnerOfCollectibles::<T>::get(&sender).iter().find(|&&x| x == unique_id) {
+				Some(dev) => {
+					Self::deposit_event(Event::ParaAuthSuccess {
+						account: sender,
+						unique_id: dev.clone(),
+						para_source,
+						para_remote: para_local,
+					});
+				},
+				None => {
+					Self::deposit_event(Event::ParaAuthFailed {
+						account: sender.clone(),
+						para_source,
+					});
+				},
+			}
+
 			Ok(())
 		}
 
 		#[pallet::call_index(5)]
 		#[pallet::weight(0)]
-		pub fn receive_auth_message(origin: OriginFor<T>, unique_id: [u8; 16]) -> DispatchResult {
+		pub fn receive_auth_message(
+			origin: OriginFor<T>,
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
+			signature: [u8; 64],
+		) -> DispatchResult {
 			// will be executed in the local parachain (A)
-			let sender = ensure_signed(origin)?;
-			let parachain_id = T::SelfParaId::get();
-			Self::deposit_event(Event::TestForQueryId { parachain_id });
+			let para_b = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
+			let para_a = T::SelfParaId::get();
+
+			Self::deposit_event(Event::ParaAuthCredentialIssued {
+				credential,
+				signature,
+				para_source: para_a,
+				para_remote: para_b,
+			});
 			Ok(())
 		}
 
@@ -285,6 +335,7 @@ pub mod pallet {
 			// 保证该用户存在
 			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
 				Self::deposit_event(Event::LocalAuthFailed { account: sender.clone() });
+				return Ok(());
 			}
 
 			// 保证该用户拥有该设备
@@ -322,9 +373,43 @@ pub mod pallet {
 			credential: BoundedVec<u8, T::MaxCredentialLength>,
 			signature: [u8; 64],
 		) -> DispatchResult {
-			// will be executed in the local parachain (A)
 			ensure_root(origin)?;
 			Self::deposit_event(Event::LocalAuthCredentialIssued { credential, signature });
+			Ok(())
+		}
+
+		#[pallet::call_index(9)]
+		#[pallet::weight(0)]
+		pub fn send_credential(
+			origin: OriginFor<T>,
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
+			signature: [u8; 64],
+			para: ParaId,
+		) -> DispatchResult {
+			// 发送B链的凭证到A链
+			ensure_root(origin)?;
+
+			match T::XcmSender::send_xcm(
+				(1, Junction::Parachain(para.into())),
+				Xcm(vec![Transact {
+					origin_type: OriginKind::Native,
+					require_weight_at_most: 1_000,
+					call: <T as Config>::RuntimeCall::from(Call::<T>::receive_auth_message {
+						credential,
+						signature,
+					})
+					.encode()
+					.into(),
+				}]),
+			) {
+				Ok(()) => {
+					Self::deposit_event(Event::TestMessage { message: 33 });
+				},
+				Err(_e) => {
+					Self::deposit_event(Event::TestMessage { message: 44 });
+				},
+			};
+
 			Ok(())
 		}
 	}

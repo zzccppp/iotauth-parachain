@@ -4,9 +4,8 @@ pub use pallet::*;
 
 use cumulus_pallet_xcm::{ensure_sibling_para, Origin as CumulusOrigin};
 use cumulus_primitives_core::ParaId;
-use frame_support::{parameter_types, BoundedVec};
+use frame_support::BoundedVec;
 use frame_system::Config as SystemConfig;
-use sp_runtime::traits::Saturating;
 use sp_std::prelude::*;
 use xcm::latest::prelude::*;
 
@@ -100,9 +99,11 @@ pub mod pallet {
 		LocalAuthSuccess {
 			account: T::AccountId,
 			unique_id: [u8; 16],
+			random: u64,
 		},
 		LocalAuthFailed {
 			account: T::AccountId,
+			random: u64,
 		},
 		LocalAuthCredentialIssued {
 			credential: BoundedVec<u8, T::MaxCredentialLength>,
@@ -113,19 +114,18 @@ pub mod pallet {
 			unique_id: [u8; 16],
 			para_source: ParaId,
 			para_remote: ParaId,
+			random: u64,
 		},
 		ParaAuthFailed {
 			account: T::AccountId,
 			para_source: ParaId,
+			random: u64,
 		},
 		ParaAuthCredentialIssued {
 			credential: BoundedVec<u8, T::MaxCredentialLength>,
 			signature: [u8; 64],
 			para_source: ParaId,
 			para_remote: ParaId,
-		},
-		TestForQueryId {
-			parachain_id: ParaId,
 		},
 		TestMessage {
 			message: u32,
@@ -224,21 +224,13 @@ pub mod pallet {
 			Ok(())
 		}
 
-		#[pallet::call_index(2)]
-		#[pallet::weight(0)]
-		pub fn query_id(origin: OriginFor<T>) -> DispatchResult {
-			let sender = ensure_signed(origin)?;
-			let parachain_id = T::SelfParaId::get();
-			Self::deposit_event(Event::TestForQueryId { parachain_id });
-			Ok(())
-		}
-
 		#[pallet::call_index(3)]
 		#[pallet::weight(0)]
 		pub fn request_for_parachain_auth(
 			origin: OriginFor<T>,
 			unique_id: [u8; 16],
 			para: ParaId,
+			random: u64,
 		) -> DispatchResult {
 			// will be executed in the local parachain (A)
 			let sender = ensure_signed(origin)?;
@@ -251,6 +243,7 @@ pub mod pallet {
 					call: <T as Config>::RuntimeCall::from(Call::<T>::reponse_for_parachain_auth {
 						sender,
 						unique_id,
+						random,
 					})
 					.encode()
 					.into(),
@@ -273,6 +266,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			sender: T::AccountId,
 			unique_id: [u8; 16],
+			random: u64,
 		) -> DispatchResult {
 			// will be executed in the parachain (B)
 			let para_source = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
@@ -280,7 +274,11 @@ pub mod pallet {
 
 			// 保证该用户存在
 			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
-				Self::deposit_event(Event::ParaAuthFailed { account: sender.clone(), para_source });
+				Self::deposit_event(Event::ParaAuthFailed {
+					account: sender.clone(),
+					para_source,
+					random,
+				});
 
 				return Ok(());
 			}
@@ -293,12 +291,14 @@ pub mod pallet {
 						unique_id: dev.clone(),
 						para_source,
 						para_remote: para_local,
+						random,
 					});
 				},
 				None => {
 					Self::deposit_event(Event::ParaAuthFailed {
 						account: sender.clone(),
 						para_source,
+						random,
 					});
 				},
 			}
@@ -328,13 +328,17 @@ pub mod pallet {
 
 		#[pallet::call_index(6)]
 		#[pallet::weight(0)]
-		pub fn request_local_auth(origin: OriginFor<T>, unique_id: [u8; 16]) -> DispatchResult {
+		pub fn request_local_auth(
+			origin: OriginFor<T>,
+			unique_id: [u8; 16],
+			random: u64,
+		) -> DispatchResult {
 			// will be executed in the local parachain (A)
 			let sender = ensure_signed(origin)?;
 
 			// 保证该用户存在
 			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
-				Self::deposit_event(Event::LocalAuthFailed { account: sender.clone() });
+				Self::deposit_event(Event::LocalAuthFailed { account: sender.clone(), random });
 				return Ok(());
 			}
 
@@ -344,10 +348,11 @@ pub mod pallet {
 					Self::deposit_event(Event::LocalAuthSuccess {
 						account: sender,
 						unique_id: dev.clone(),
+						random,
 					});
 				},
 				None => {
-					Self::deposit_event(Event::LocalAuthFailed { account: sender });
+					Self::deposit_event(Event::LocalAuthFailed { account: sender, random });
 				},
 			}
 

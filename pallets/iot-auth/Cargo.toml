@@ -21,6 +21,9 @@ xcm = { git = "https://github.com/paritytech/polkadot", default-features = false
 cumulus-primitives-core = { git = "https://github.com/paritytech/cumulus", default-features = false, branch = 'polkadot-v0.9.37' }
 cumulus-pallet-xcm = { git = "https://github.com/paritytech/cumulus", default-features = false, branch = 'polkadot-v0.9.37' }
 
+# benchmarking
+frame-benchmarking = { git = "https://github.com/paritytech/substrate", default-features = false, optional = true, "branch" = "polkadot-v0.9.37" }
+
 [features]
 default = ["std"]
 std = [
@@ -32,4 +35,6 @@ std = [
   "sp-std/std",
   "sp-runtime/std",
   "xcm/std",
+  "frame-benchmarking/std",
 ]
+runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]

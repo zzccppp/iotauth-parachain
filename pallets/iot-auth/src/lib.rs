@@ -109,6 +109,18 @@ pub mod pallet {
 			credential: BoundedVec<u8, T::MaxCredentialLength>,
 			signature: [u8; 64],
 		},
+		ParaAuthRequestSend {
+			account: T::AccountId,
+			unique_id: [u8; 16],
+			random: u64,
+			para_remote: ParaId,
+		},
+		ParaAuthCredentialSend {
+			credential: BoundedVec<u8, T::MaxCredentialLength>,
+			signature: [u8; 64],
+			para_source: ParaId,
+			para_remote: ParaId,
+		},
 		ParaAuthSuccess {
 			account: T::AccountId,
 			unique_id: [u8; 16],
@@ -118,7 +130,9 @@ pub mod pallet {
 		},
 		ParaAuthFailed {
 			account: T::AccountId,
+			unique_id: [u8; 16],
 			para_source: ParaId,
+			para_target: ParaId,
 			random: u64,
 		},
 		ParaAuthCredentialIssued {
@@ -126,13 +140,6 @@ pub mod pallet {
 			signature: [u8; 64],
 			para_source: ParaId,
 			para_remote: ParaId,
-		},
-		TestMessage {
-			message: u32,
-		},
-		TestResponse {
-			unique_id: [u8; 16],
-			account: T::AccountId,
 		},
 	}
 
@@ -234,6 +241,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			// will be executed in the local parachain (A)
 			let sender = ensure_signed(origin)?;
+			let acc = sender.clone();
 
 			match T::XcmSender::send_xcm(
 				(1, Junction::Parachain(para.into())),
@@ -250,10 +258,15 @@ pub mod pallet {
 				}]),
 			) {
 				Ok(()) => {
-					Self::deposit_event(Event::TestMessage { message: 11 });
+					Self::deposit_event(Event::ParaAuthRequestSend {
+						account: acc,
+						unique_id,
+						random,
+						para_remote: para,
+					});
 				},
-				Err(e) => {
-					Self::deposit_event(Event::TestMessage { message: 22 });
+				Err(_e) => {
+					return Err(DispatchError::Other("send xcm failed"));
 				},
 			};
 
@@ -274,11 +287,28 @@ pub mod pallet {
 
 			// 保证该用户存在
 			if !OwnerOfCollectibles::<T>::contains_key(&sender) {
-				Self::deposit_event(Event::ParaAuthFailed {
-					account: sender.clone(),
-					para_source,
-					random,
-				});
+				match T::XcmSender::send_xcm(
+					(1, Junction::Parachain(para_source.into())),
+					Xcm(vec![Transact {
+						origin_type: OriginKind::Native,
+						require_weight_at_most: 1_000,
+						call: <T as Config>::RuntimeCall::from(
+							Call::<T>::receive_authfailed_message {
+								account: sender,
+								unique_id,
+								random,
+							},
+						)
+						.encode()
+						.into(),
+					}]),
+				) {
+					Ok(()) => {},
+					Err(_e) => {
+						return Err(DispatchError::Other("send xcm failed"));
+						// Self::deposit_event(Event::TestMessage { message: 44 });
+					},
+				};
 
 				return Ok(());
 			}
@@ -295,14 +325,53 @@ pub mod pallet {
 					});
 				},
 				None => {
-					Self::deposit_event(Event::ParaAuthFailed {
-						account: sender.clone(),
-						para_source,
-						random,
-					});
+					match T::XcmSender::send_xcm(
+						(1, Junction::Parachain(para_source.into())),
+						Xcm(vec![Transact {
+							origin_type: OriginKind::Native,
+							require_weight_at_most: 1_000,
+							call: <T as Config>::RuntimeCall::from(
+								Call::<T>::receive_authfailed_message {
+									account: sender,
+									unique_id,
+									random,
+								},
+							)
+							.encode()
+							.into(),
+						}]),
+					) {
+						Ok(()) => {},
+						Err(_e) => {
+							return Err(DispatchError::Other("send xcm failed"));
+							// Self::deposit_event(Event::TestMessage { message: 44 });
+						},
+					};
 				},
 			}
 
+			Ok(())
+		}
+
+		#[pallet::call_index(10)]
+		#[pallet::weight(0)]
+		pub fn receive_authfailed_message(
+			origin: OriginFor<T>,
+			account: T::AccountId,
+			unique_id: [u8; 16],
+			random: u64,
+		) -> DispatchResult {
+			// will be executed in the local parachain (A)
+			let para_b = ensure_sibling_para(<T as Config>::RuntimeOrigin::from(origin))?;
+			let para_a = T::SelfParaId::get();
+
+			Self::deposit_event(Event::ParaAuthFailed {
+				account,
+				unique_id,
+				para_source: para_a,
+				para_target: para_b,
+				random,
+			});
 			Ok(())
 		}
 
@@ -393,6 +462,8 @@ pub mod pallet {
 		) -> DispatchResult {
 			// 发送B链的凭证到A链
 			ensure_root(origin)?;
+			let para_b = T::SelfParaId::get();
+			let cred = credential.clone();
 
 			match T::XcmSender::send_xcm(
 				(1, Junction::Parachain(para.into())),
@@ -408,10 +479,17 @@ pub mod pallet {
 				}]),
 			) {
 				Ok(()) => {
-					Self::deposit_event(Event::TestMessage { message: 33 });
+					// Self::deposit_event(Event::TestMessage { message: 33 });
+					Self::deposit_event(Event::ParaAuthCredentialSend {
+						credential: cred,
+						signature,
+						para_source: para,
+						para_remote: para_b,
+					});
 				},
 				Err(_e) => {
-					Self::deposit_event(Event::TestMessage { message: 44 });
+					return Err(DispatchError::Other("send xcm failed"));
+					// Self::deposit_event(Event::TestMessage { message: 44 });
 				},
 			};
 
